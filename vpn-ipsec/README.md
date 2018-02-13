@@ -1,7 +1,7 @@
 ## IPSEC SITE TO SITE 
 ### With StrongSwan
 
-Example ipsec with [**StrongSwan**][https://www.strongswan.org] in vagrant with:
+Example ipsec with [**StrongSwan**](https://www.strongswan.org) in vagrant with:
 - IKEv1
 - Pre-Shared Key
 - Phase1:
@@ -35,3 +35,28 @@ Example ipsec with [**StrongSwan**][https://www.strongswan.org] in vagrant with:
 ~~~
 
 With this machines you can connex the moon-client machine to sun-client. Asume the connection between Moon and Sun is Internet or any no secure network. 
+
+## With Certificate
+To use it change in *ipsec.conf*:
+~~~ 
+## Comment 
+    leftauth = psk
+    rightauth = psk 
+
+## And uncomment:
+    leftcert = moon.com.cert.pem
+    leftfirewall = yes
+~~~
+
+And in *ipsec.secrets*:
+~~~
+## Comment
+%any 10.10.0.20 : PSK "123123123
+
+## Uncomment
+: RSA moon.com.key.pem
+~~~
+
+Do it in moon-server and sun-server.
+
+If you want to generate your own certificates, StrongSwan explain it [here](https://wiki.strongswan.org/projects/strongswan/wiki/SimpleCA).
