@@ -1,0 +1,157 @@
+cluster={
+  "moon-server" => {
+    :box => "centos/7",
+    :ram => 512,
+    :cpu => 1,
+    :private_ip => "10.10.0.10",
+    :private_network => "space_network"
+  },
+  "moon-client" => {
+    :box => "ubuntu/xenial64",
+    :ram => 256,
+    :cpu => 1,
+    :private_ip => "10.10.2.5",
+    :private_network => "moon_network"
+  },
+  "sun-server" => {
+    :box => "centos/7",
+    :ram => 512,
+    :cpu => 1,
+    :private_ip => "10.10.0.20",
+    :private_network => "space_network"
+  },
+  "sun-client1" => {
+    :box => "centos/7",
+    :ram => 256,
+    :cpu => 1,
+    :private_ip => "10.10.3.5",
+    :private_network => "sun_network1"
+  },
+  "sun-client2" => {
+    :box => "centos/7",
+    :ram => 256,
+    :cpu => 1,
+    :private_ip => "10.10.4.5",
+    :private_network => "sun_network2"
+  }
+}
+
+$first_config = <<SCRIPT
+sudo yum -y update && sudo yum -y upgrade
+sudo yum -y install tcpdump net-tools traceroute vim
+sudo systemctl disable NetworkManager && sudo systemctl stop NetworkManager
+SCRIPT
+
+$install_ipsec = <<SCRIPT
+yum install -y http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/s/strongswan-5.5.3-1.el7.x86_64.rpm
+SCRIPT
+
+$launch_ipsec = <<SCRIPT
+sudo systemctl enable strongswan
+sudo systemctl start strongswan
+SCRIPT
+
+$iptables_moon = <<SCRIPT
+sudo echo net.ipv4.ip_forward=1 >> /etc/sysctl.conf
+sudo echo net.ipv4.conf.all.accept_redirects=0 >> /etc/sysctl.conf
+sudo echo net.ipv6.conf.all.accept_redirects=0 >> /etc/sysctl.conf
+sudo sysctl -p /etc/sysctl.conf
+sudo iptables -A FORWARD -i eth2 -j ACCEPT
+sudo iptables -A FORWARD -o eth2 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
+SCRIPT
+
+$iptables_sun = <<SCRIPT
+sudo echo net.ipv4.ip_forward=1 >> /etc/sysctl.conf
+sudo echo net.ipv4.conf.all.accept_redirects=0 >> /etc/sysctl.conf
+sudo echo net.ipv6.conf.all.accept_redirects=0 >> /etc/sysctl.conf
+sudo sysctl -p /etc/sysctl.conf
+sudo iptables -A FORWARD -i eth2 -j ACCEPT
+sudo iptables -A FORWARD -o eth2 -j ACCEPT
+sudo iptables -A FORWARD -i eth3 -j ACCEPT
+sudo iptables -A FORWARD -o eth3 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -o eth1 -j MASQUERADE
+SCRIPT
+
+
+Vagrant.configure("2") do |config|
+    cluster.each_with_index do |(hostname, machine), index|
+        config.vm.define hostname do |node|
+            node.vm.box = machine[:box]
+            node.vm.hostname = hostname
+            node.vm.provider "virtualbox" do |vb|
+                vb.customize ["modifyvm", :id, "--memory", machine[:ram]]
+                vb.customize ["modifyvm", :id, "--cpus", machine[:cpu]]
+            end # end customize
+        
+            # Moon Server
+            if index == 0
+                node.vm.network "private_network", ip: machine[:private_ip], 
+                    virtualbox__intnet: machine[:private_network]
+                node.vm.network "private_network", ip: "10.10.2.2", 
+                    virtualbox__intnet: "moon_network"
+
+                
+                node.vm.provision "shell", inline: $first_config
+                node.vm.provision "shell", inline: $install_ipsec
+                
+                node.vm.provision "file", source: "moon-server", destination: "~/moon-server"
+                node.vm.provision "shell", inline: "sudo cp -rf /home/vagrant/moon-server/strongswan/* /etc/strongswan/"
+
+                node.vm.provision "shell", inline: $iptables_moon
+                node.vm.provision "shell", inline: $launch_ipsec
+            end # end if Moon Server
+
+            # Moon Client
+            if index == 1
+                node.vm.network "private_network", ip: machine[:private_ip], 
+                    virtualbox__intnet: machine[:private_network]
+
+                node.vm.provision "shell", inline: "sudo apt-get update -y && sudo apt-get upgrade -y"
+                node.vm.provision "shell", inline: "sudo ip route del default via 10.0.2.2 && ip route add default via 10.10.2.2"
+            end # end if Moon Client
+
+            # Sun Server
+            if index == 2
+                node.vm.network "private_network", ip: machine[:private_ip], 
+                    virtualbox__intnet: machine[:private_network]
+                node.vm.network "private_network", ip: "10.10.3.2", 
+                    virtualbox__intnet: "sun_network1"
+                node.vm.network "private_network", ip: "10.10.4.2", 
+                    virtualbox__intnet: "sun_network2"
+
+                node.vm.provision "shell", inline: $first_config
+                node.vm.provision "shell", inline: $install_ipsec
+
+                node.vm.provision "file", source: "sun-server", destination: "/tmp/"
+                node.vm.provision "shell", inline: "sudo cp -rf /tmp/sun-server/* /etc/strongswan/"
+
+                node.vm.provision "shell", inline: $iptables_sun
+                node.vm.provision "shell", inline: $launch_ipsec
+            end # end if Sun Server
+
+            # Sun Client 1
+            if index == 3
+                node.vm.network "private_network", ip: machine[:private_ip], 
+                    virtualbox__intnet: machine[:private_network]
+                node.vm.provision "shell", inline: $first_config
+
+                node.vm.provision "shell", inline: "sudo yum install -y httpd && systemctl start httpd"
+                node.vm.provision "shell", inline: "sudo ip route del default via 10.0.2.2 && ip route add default via 10.10.3.2"
+            end # end if Sun Client 1
+
+            # Sun Client 2
+            if index == 4
+                node.vm.network "private_network", ip: machine[:private_ip], 
+                    virtualbox__intnet: machine[:private_network]
+                node.vm.provision "shell", inline: $first_config
+
+                node.vm.provision "shell", inline: "sudo yum install -y httpd && systemctl start httpd"
+                node.vm.provision "shell", inline: "sudo ip route del default via 10.0.2.2 && ip route add default via 10.10.4.2"
+            end # end if Sun Client 2
+
+        end # end config
+    end # end cluster
+end # end vagrant
