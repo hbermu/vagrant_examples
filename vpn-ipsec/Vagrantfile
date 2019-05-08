@@ -38,12 +38,29 @@ cluster={
 
 $first_config = <<SCRIPT
 sudo yum -y update && sudo yum -y upgrade
-sudo yum -y install tcpdump net-tools traceroute vim
+sudo yum -y install tcpdump net-tools traceroute vim epel-release
 sudo systemctl disable NetworkManager && sudo systemctl stop NetworkManager
 SCRIPT
 
 $install_ipsec = <<SCRIPT
-yum install -y http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/s/strongswan-5.5.3-1.el7.x86_64.rpm
+yum install -y strongswan
+sudo echo """# /usr/lib/systemd/system/strongswan.service
+[Unit]
+Description=strongSwan IPsec IKEv1/IKEv2 daemon using ipsec.conf
+After=syslog.target network-online.target libvirtd.service
+
+[Service]
+ExecStartPre=/etc/strongswan/iptables.sh start
+ExecStart=/usr/sbin/strongswan start --nofork
+StandardOutput=syslog
+Restart=on-abnormal
+#ExecStopPre=/bin/bash /opt/VethInterface.sh stop
+ExecStopPost=/etc/strongswan/iptables.sh stop
+
+[Install]
+WantedBy=multi-user.target
+""" > /usr/lib/systemd/system/strongswan.service
+sudo systemctl daemon-reload
 SCRIPT
 
 $launch_ipsec = <<SCRIPT
@@ -92,13 +109,11 @@ Vagrant.configure("2") do |config|
                     virtualbox__intnet: machine[:private_network]
                 node.vm.network "private_network", ip: "10.10.2.2", 
                     virtualbox__intnet: "moon_network"
-
-                
+               
                 node.vm.provision "shell", inline: $first_config
                 node.vm.provision "shell", inline: $install_ipsec
                 
-                node.vm.provision "file", source: "moon-server", destination: "~/moon-server"
-                node.vm.provision "shell", inline: "sudo cp -rf /home/vagrant/moon-server/strongswan/* /etc/strongswan/"
+                node.vm.provision "shell", inline: "sudo cp -rf /vagrant/moon-server/* /etc/strongswan/"
 
                 node.vm.provision "shell", inline: $iptables_moon
                 node.vm.provision "shell", inline: $launch_ipsec
@@ -125,8 +140,7 @@ Vagrant.configure("2") do |config|
                 node.vm.provision "shell", inline: $first_config
                 node.vm.provision "shell", inline: $install_ipsec
 
-                node.vm.provision "file", source: "sun-server", destination: "/tmp/"
-                node.vm.provision "shell", inline: "sudo cp -rf /tmp/sun-server/* /etc/strongswan/"
+                node.vm.provision "shell", inline: "sudo cp -rf /vagrant/sun-server/* /etc/strongswan/"
 
                 node.vm.provision "shell", inline: $iptables_sun
                 node.vm.provision "shell", inline: $launch_ipsec
